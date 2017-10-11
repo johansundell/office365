@@ -1,6 +1,6 @@
 /office365
 /kontoret.pixpro.net.*
-/config.json
+/*.json
 # Binaries for programs and plugins
 *.exe
 *.dll
