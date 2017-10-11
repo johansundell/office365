@@ -37,16 +37,34 @@ func main() {
 	http.HandleFunc("/login", handleLogin)
 	http.HandleFunc("/callback", handleCallback)
 
-	data, err := ioutil.ReadFile(filename)
-	if err == nil {
-		token := &oauth2.Token{}
-		if err := json.Unmarshal(data, &token); err == nil {
-			client := getClient(context.Background(), token)
-			runner(client)
-		}
+	token := &oauth2.Token{}
+	if err := loadJson(filename, token); err == nil {
+		client := getClient(context.Background(), token)
+		runner(client)
 	}
-
 	log.Println(http.ListenAndServeTLS(":8080", "kontoret.pixpro.net.crt", "kontoret.pixpro.net.key", nil))
+}
+
+func saveJson(name string, i interface{}) error {
+	data, err := json.Marshal(i)
+	if err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(name, data, 0664); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadJson(name string, i interface{}) error {
+	data, err := ioutil.ReadFile(name)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &i); err != nil {
+		return err
+	}
+	return nil
 }
 
 func handleMain(w http.ResponseWriter, r *http.Request) {
@@ -70,14 +88,9 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "https://kontoret.pixpro.net:8080", http.StatusTemporaryRedirect)
-	data, err := json.Marshal(token)
-	if err != nil {
+
+	if err := saveJson(filename, token); err != nil {
 		log.Println(err)
-		return
-	}
-	if err := ioutil.WriteFile(filename, data, 0664); err != nil {
-		log.Println(err)
-		return
 	}
 	client := getClient(ctx, token)
 	runner(client)
