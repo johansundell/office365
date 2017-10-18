@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,13 +37,41 @@ func main() {
 	http.HandleFunc("/", handleMain)
 	http.HandleFunc("/login", handleLogin)
 	http.HandleFunc("/callback", handleCallback)
+	http.HandleFunc("/webhook", handleWebhook)
+
+	go func() {
+		log.Println(http.ListenAndServeTLS(":8080", "kontoret.pixpro.net.crt", "kontoret.pixpro.net.key", nil))
+	}()
 
 	token := &oauth2.Token{}
 	if err := loadJson(filename, token); err == nil {
+		if !token.Valid() {
+			token, err = oauthConfig.TokenSource(context.Background(), token).Token()
+			if err != nil {
+				log.Println(err)
+			}
+			if err := saveJson(filename, token); err != nil {
+				log.Panicln(err)
+			}
+		}
 		client := getClient(context.Background(), token)
+
+		/*resp, err := client.Get("https://graph.microsoft.com/v1.0/me/mailFolders")
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := ioutil.ReadAll(resp.Body)
+		fmt.Println(string(b))*/
+
+		setUpWebhook(client)
 		runner(client)
 	}
-	log.Println(http.ListenAndServeTLS(":8080", "kontoret.pixpro.net.crt", "kontoret.pixpro.net.key", nil))
+
+	fmt.Println("Webs is now running.  Press CTRL-C to exit.")
+	// Simple way to keep program running until CTRL-C is pressed.
+	<-make(chan struct{})
 }
 
 func saveJson(name string, i interface{}) error {
@@ -65,6 +94,62 @@ func loadJson(name string, i interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func setUpWebhook(client *http.Client) {
+	sr := Subscription{}
+	//sr.OdataType = "#Microsoft.OutlookServices.PushSubscription"
+	sr.Resource = "/me/mailfolders('inbox')/messages"
+	sr.NotificationURL = "https://kontoret.pixpro.net:8080/webhook"
+	sr.ChangeType = "created, deleted, updated"
+	sr.ExpirationDateTime = time.Now().Add(30 * time.Minute)
+
+	b := new(bytes.Buffer)
+	err := json.NewEncoder(b).Encode(sr)
+	if err != nil {
+		log.Println("1", err)
+		return
+	}
+	resp, err := client.Post("https://graph.microsoft.com/v1.0/subscriptions", "application/json", b)
+	if err != nil {
+		log.Println("2", err)
+		return
+	}
+	defer resp.Body.Close()
+	fmt.Println(resp.StatusCode, resp.Status)
+	//fmt.Println(jsonFormater.GetFromReader(resp.Body))
+	//return
+	r := Subscription{}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		log.Println("3", err)
+		//return
+	}
+	saveJson("resp.json", r)
+}
+
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
+	log.Println("webhook")
+	/*sr := SubscriptionResponce{}
+	if err := json.NewDecoder(r.Body).Decode(&sr); err != nil {
+		log.Println(err)
+		return
+	}
+	saveJson("responce.txt", sr)*/
+	/**/
+	id := r.FormValue("validationToken")
+	if id != "" {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(w, id)
+		return
+	}
+
+	defer r.Body.Close()
+	b, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println("resp = ", string(b))
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func handleMain(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +185,7 @@ func runner(client *http.Client) {
 	if err := listMailBox(client); err != nil {
 		log.Println(err)
 	}
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(10 * time.Minute)
 	quit := make(chan struct{})
 	go func() {
 		for {
@@ -118,7 +203,8 @@ func runner(client *http.Client) {
 }
 
 func listMailBox(client *http.Client) error {
-	resp, err := client.Get("https://graph.microsoft.com/v1.0/me/mailfolders/inbox/messages")
+	//resp, err := client.Get("https://graph.microsoft.com/v1.0/me/mailfolders/inbox/messages")
+	resp, err := client.Get("https://graph.microsoft.com/v1.0/me/messages")
 	if err != nil {
 		return err
 	}
@@ -129,7 +215,10 @@ func listMailBox(client *http.Client) error {
 	}
 	for _, row := range mb.Value {
 		fmt.Println(row.Subject)
+		//fmt.Println(row.Body)
+
 	}
+	fmt.Println("--------------------")
 	return nil
 }
 
@@ -139,6 +228,27 @@ func getClient(ctx context.Context, t *oauth2.Token) *http.Client {
 	client.Timeout = 2 * time.Minute
 	return client
 }
+
+type Subscription struct {
+	ChangeType         string    `json:"changeType"`
+	ClientState        string    `json:"clientState"`
+	ExpirationDateTime time.Time `json:"expirationDateTime"`
+	ID                 string    `json:"id"`
+	NotificationURL    string    `json:"notificationUrl"`
+	Resource           string    `json:"resource"`
+}
+
+/*type SubscriptionResponce struct {
+	OdataContext                   string    `json:"@odata.context"`
+	OdataID                        string    `json:"@odata.id"`
+	OdataType                      string    `json:"@odata.type"`
+	ChangeType                     string    `json:"ChangeType"`
+	ClientState                    string    `json:"ClientState"`
+	ID                             string    `json:"Id"`
+	NotificationURL                string    `json:"NotificationURL"`
+	Resource                       string    `json:"Resource"`
+	SubscriptionExpirationDateTime time.Time `json:"SubscriptionExpirationDateTime"`
+}*/
 
 type Mailbox struct {
 	_odata_context string `json:"@odata.context"`
