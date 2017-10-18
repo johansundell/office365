@@ -56,20 +56,11 @@ func main() {
 		}
 		client := getClient(context.Background(), token)
 
-		/*resp, err := client.Get("https://graph.microsoft.com/v1.0/me/mailFolders")
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		defer resp.Body.Close()
-		b, _ := ioutil.ReadAll(resp.Body)
-		fmt.Println(string(b))*/
-
 		setUpWebhook(client)
 		runner(client)
 	}
 
-	fmt.Println("Webs is now running.  Press CTRL-C to exit.")
+	fmt.Println("Web is now running.  Press CTRL-C to exit.")
 	// Simple way to keep program running until CTRL-C is pressed.
 	<-make(chan struct{})
 }
@@ -98,8 +89,8 @@ func loadJson(name string, i interface{}) error {
 
 func setUpWebhook(client *http.Client) {
 	sr := Subscription{}
-	//sr.OdataType = "#Microsoft.OutlookServices.PushSubscription"
-	sr.Resource = "/me/mailfolders('inbox')/messages"
+	//sr.Resource = "/me/mailfolders('inbox')/messages"
+	sr.Resource = "me/messages"
 	sr.NotificationURL = "https://kontoret.pixpro.net:8080/webhook"
 	sr.ChangeType = "created, deleted, updated"
 	sr.ExpirationDateTime = time.Now().Add(30 * time.Minute)
@@ -129,13 +120,7 @@ func setUpWebhook(client *http.Client) {
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	log.Println("webhook")
-	/*sr := SubscriptionResponce{}
-	if err := json.NewDecoder(r.Body).Decode(&sr); err != nil {
-		log.Println(err)
-		return
-	}
-	saveJson("responce.txt", sr)*/
-	/**/
+
 	id := r.FormValue("validationToken")
 	if id != "" {
 		w.Header().Set("Content-Type", "text/plain")
@@ -144,11 +129,16 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer r.Body.Close()
-	b, err := ioutil.ReadAll(r.Body)
+	/*b, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println("resp = ", string(b))
+	fmt.Println("resp = ", string(b))*/
+	web := &WebHookReponse{}
+	if err := json.NewDecoder(r.Body).Decode(web); err != nil {
+		log.Println(err)
+	}
+	saveJson("wbs.json", web)
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -238,17 +228,21 @@ type Subscription struct {
 	Resource           string    `json:"resource"`
 }
 
-/*type SubscriptionResponce struct {
-	OdataContext                   string    `json:"@odata.context"`
-	OdataID                        string    `json:"@odata.id"`
-	OdataType                      string    `json:"@odata.type"`
-	ChangeType                     string    `json:"ChangeType"`
-	ClientState                    string    `json:"ClientState"`
-	ID                             string    `json:"Id"`
-	NotificationURL                string    `json:"NotificationURL"`
-	Resource                       string    `json:"Resource"`
-	SubscriptionExpirationDateTime time.Time `json:"SubscriptionExpirationDateTime"`
-}*/
+type WebHookReponse struct {
+	Value []struct {
+		SubscriptionID                 string    `json:"subscriptionId"`
+		SubscriptionExpirationDateTime time.Time `json:"subscriptionExpirationDateTime"`
+		ChangeType                     string    `json:"changeType"`
+		Resource                       string    `json:"resource"`
+		ResourceData                   struct {
+			OdataType string `json:"@odata.type"`
+			OdataID   string `json:"@odata.id"`
+			OdataEtag string `json:"@odata.etag"`
+			ID        string `json:"id"`
+		} `json:"resourceData"`
+		ClientState string `json:"clientState"`
+	} `json:"value"`
+}
 
 type Mailbox struct {
 	_odata_context string `json:"@odata.context"`
